@@ -119,43 +119,44 @@ public class LoanController {
 
     @PostMapping("/user/loans/apply")
     public ResponseEntity<?> applyForLoan(@AuthenticationPrincipal UserDetails userDetails,
-                                          @RequestBody LoanApplicationRequest request) {
+                                           @RequestBody LoanApplicationRequest request) {
         try {
-            logger.info("Loan application request for user: {}", userDetails.getUsername());
-            
+            logger.info("Loan application request for user: {}", userDetails != null ? userDetails.getUsername() : "null");
+            logger.info("Request data - amount: {}, term: {}, purpose: {}", request.getAmount(), request.getTerm(), request.getPurpose());
+
             if (userDetails == null) {
+                logger.warn("No authentication provided");
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Authentication required");
             }
-            
+
             Optional<User> userOpt = userRepository.findByUsername(userDetails.getUsername());
             if (userOpt.isEmpty()) {
+                logger.warn("User not found: {}", userDetails.getUsername());
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body("User not found");
             }
-            
+
             User user = userOpt.get();
             logger.info("Found user: {} (ID: {})", user.getUsername(), user.getId());
 
-            // Check if user has uploaded required documents
+            // Check if user has uploaded at least one document
             List<Document> userDocuments = documentService.getDocumentsByUser(user);
+            logger.info("User {} has {} documents", user.getUsername(), userDocuments.size());
+            for (Document doc : userDocuments) {
+                logger.info("Document: ID={}, Type={}, Status={}", doc.getId(), doc.getDocumentType(), doc.getStatus());
+            }
+
             if (userDocuments.isEmpty()) {
-                logger.warn("User {} has no documents uploaded", user.getUsername());
-                return ResponseEntity.badRequest().body("Please upload required documents before applying for loan");
+                logger.warn("User {} has no documents uploaded - rejecting application", user.getUsername());
+                return ResponseEntity.badRequest().body("Please upload at least one document before applying for loan. Documents found: " + userDocuments.size());
             }
 
-            // Check if all documents are verified
-            boolean allDocumentsVerified = userDocuments.stream()
-                    .allMatch(doc -> doc.getStatus() == Document.Status.VERIFIED);
-            if (!allDocumentsVerified) {
-                logger.warn("User {} has unverified documents", user.getUsername());
-                return ResponseEntity.badRequest().body("All documents must be verified before applying for loan");
-            }
-
+            logger.info("Creating loan application for user {}", user.getUsername());
             LoanApplication application = loanService.applyForLoan(user, request.getAmount(), request.getTerm(), request.getPurpose());
             logger.info("Loan application created successfully: {} for user: {}", application.getId(), user.getUsername());
             return ResponseEntity.ok(application);
-            
+
         } catch (Exception e) {
-            logger.error("Error processing loan application for user: {}", userDetails.getUsername(), e);
+            logger.error("Error processing loan application for user: {}", userDetails != null ? userDetails.getUsername() : "null", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Failed to process loan application: " + e.getMessage());
         }
@@ -183,17 +184,6 @@ public class LoanController {
         return ResponseEntity.ok(loans);
     }
 
-    @PostMapping("/admin/loans/verify/{id}")
-    public ResponseEntity<LoanApplication> verifyLoan(@PathVariable Long id) {
-        LoanApplication application = loanService.verifyLoan(id);
-        return ResponseEntity.ok(application);
-    }
-
-    @PostMapping("/admin/loans/decide/{id}")
-    public ResponseEntity<LoanApplication> approveOrRejectLoan(@PathVariable Long id) {
-        LoanApplication application = loanService.approveOrRejectLoan(id);
-        return ResponseEntity.ok(application);
-    }
 
     @PostMapping("/admin/loans/approve/{id}")
     public ResponseEntity<LoanApplication> approveLoan(@PathVariable Long id) {
